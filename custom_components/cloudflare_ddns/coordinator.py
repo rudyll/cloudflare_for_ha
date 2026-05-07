@@ -63,7 +63,11 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             ipv4 = await self._detect_ip_with_fallback(session, IPV4_SOURCES, 4)
 
         if self._entry.data.get(CONF_UPDATE_IPV6):
-            ipv6 = await self._detect_ip_with_fallback(session, IPV6_SOURCES, 6)
+            ipv6 = _get_local_stable_ipv6()
+            if ipv6 is None:
+                ipv6 = await self._detect_ip_with_fallback(session, IPV6_SOURCES, 6)
+            else:
+                _LOGGER.debug("IPv6 detected from local interface: %s", ipv6)
 
         changed = False
         if ipv4:
@@ -184,6 +188,32 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Cloudflare update {record_type} error: {err}") from err
         _LOGGER.info("Updated %s record %s → %s", record_type, self._record_name, ip)
         return True
+
+
+def _get_local_stable_ipv6() -> str | None:
+    """Read the first stable (non-temporary) global IPv6 from /proc/net/if_inet6.
+
+    Temporary privacy-extension addresses (IFA_F_TEMPORARY = 0x01) are used for
+    outbound connections, so external IP-detection services return them. For DDNS
+    we want the stable EUI-64 address that accepts inbound connections.
+    """
+    try:
+        with open("/proc/net/if_inet6") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 6:
+                    continue
+                addr_hex, _idx, _prefix, scope_hex, flags_hex, _iface = parts
+                if int(scope_hex, 16) != 0:        # must be global scope
+                    continue
+                if int(flags_hex, 16) & 0x01:      # skip IFA_F_TEMPORARY
+                    continue
+                addr = ipaddress.IPv6Address(int(addr_hex, 16))
+                if not addr.is_private and not addr.is_loopback and not addr.is_link_local:
+                    return str(addr)
+    except OSError:
+        pass
+    return None
 
 
 def _validate_ip(candidate: str, version: int) -> str | None:
