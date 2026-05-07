@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 from datetime import datetime, timedelta
 
 from homeassistant.core import HomeAssistant
@@ -16,8 +18,8 @@ from .const import (
     CONF_UPDATE_IPV4,
     CONF_UPDATE_IPV6,
     CF_BASE,
-    IPV4_URL,
-    IPV6_URL,
+    IPV4_SOURCES,
+    IPV6_SOURCES,
     UPDATE_INTERVAL_MINUTES,
 )
 
@@ -58,10 +60,10 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
         ipv6: str | None = None
 
         if self._entry.data.get(CONF_UPDATE_IPV4):
-            ipv4 = await self._detect_ip(session, IPV4_URL, "IPv4")
+            ipv4 = await self._detect_ip_with_fallback(session, IPV4_SOURCES, 4)
 
         if self._entry.data.get(CONF_UPDATE_IPV6):
-            ipv6 = await self._detect_ip(session, IPV6_URL, "IPv6")
+            ipv6 = await self._detect_ip_with_fallback(session, IPV6_SOURCES, 6)
 
         changed = False
         if ipv4:
@@ -74,15 +76,49 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
 
         return {"ipv4": ipv4, "ipv6": ipv6, "last_updated": last_updated}
 
-    async def _detect_ip(self, session, url: str, label: str) -> str | None:
+    async def _detect_ip_with_fallback(self, session, sources: list[str], version: int) -> str | None:
+        """Try each source in order; return the first valid IP of the given version."""
+        label = f"IPv{version}"
+        for url in sources:
+            try:
+                async with session.get(url, timeout=8) as resp:
+                    if resp.status != 200:
+                        _LOGGER.debug("%s: %s returned HTTP %s, trying next", label, url, resp.status)
+                        continue
+                    text = await resp.text()
+                ip = self._extract_ip(text, version)
+                if ip:
+                    _LOGGER.debug("%s detected via %s: %s", label, url, ip)
+                    return ip
+                _LOGGER.debug("%s: no valid IP in response from %s", label, url)
+            except Exception as err:
+                _LOGGER.debug("%s: %s failed (%s), trying next", label, url, err)
+        raise UpdateFailed(f"All {label} sources failed: {sources}")
+
+    @staticmethod
+    def _extract_ip(text: str, version: int) -> str | None:
+        """Extract the first valid IPv4 or IPv6 address from arbitrary response text."""
+        # Try JSON {"ip": "..."} first
         try:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status != 200:
-                    raise UpdateFailed(f"Failed to detect {label}: HTTP {resp.status}")
-                body = await resp.json()
-                return body.get("ip")
-        except Exception as err:
-            raise UpdateFailed(f"Error detecting {label}: {err}") from err
+            import json
+            data = json.loads(text)
+            candidate = data.get("ip") or data.get("address") or data.get("query")
+            if candidate:
+                return _validate_ip(candidate, version)
+        except (ValueError, AttributeError):
+            pass
+
+        # Fall back to regex scan
+        if version == 4:
+            pattern = r'\b(\d{1,3}(?:\.\d{1,3}){3})\b'
+        else:
+            pattern = r'([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7})'
+
+        for match in re.finditer(pattern, text):
+            result = _validate_ip(match.group(1), version)
+            if result:
+                return result
+        return None
 
     async def _sync_record(self, session, record_type: str, ip: str) -> bool:
         """Update or create the DNS record. Returns True if a change was made."""
@@ -148,3 +184,13 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Cloudflare update {record_type} error: {err}") from err
         _LOGGER.info("Updated %s record %s → %s", record_type, self._record_name, ip)
         return True
+
+
+def _validate_ip(candidate: str, version: int) -> str | None:
+    try:
+        addr = ipaddress.ip_address(candidate.strip())
+        if addr.version == version and not addr.is_private and not addr.is_loopback:
+            return str(addr)
+    except ValueError:
+        pass
+    return None

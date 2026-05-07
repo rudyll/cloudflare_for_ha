@@ -9,7 +9,19 @@ CONF_UPDATE_IPV6 = "update_ipv6"
 
 CF_BASE = "https://api.cloudflare.com/client/v4"
 
-IPV4_URL = "https://api.ipify.org?format=json"
-IPV6_URL = "https://api6.ipify.org?format=json"
+IPV4_SOURCES = [
+    "https://myip4.ipip.net",
+    "https://ddns.oray.com/checkip",
+    "https://ip.3322.net",
+    "https://4.ipw.cn",
+]
+
+IPV6_SOURCES = [
+    "https://api64.ipify.org?format=json",
+    "https://speed.neu6.edu.cn/getIP.php",
+    "https://v6.ident.me",
+    "https://6.ipw.cn",
+    "https://v6.yinghualuo.cn/bejson",
+]
 
 UPDATE_INTERVAL_MINUTES = 5
