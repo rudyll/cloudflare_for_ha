@@ -6,6 +6,8 @@ CONF_ZONE_ID = "zone_id"
 CONF_RECORD_NAME = "record_name"
 CONF_UPDATE_IPV4 = "update_ipv4"
 CONF_UPDATE_IPV6 = "update_ipv6"
+CONF_CUSTOM_IPV4_URLS = "custom_ipv4_urls"
+CONF_CUSTOM_IPV6_URLS = "custom_ipv6_urls"
 
 CF_BASE = "https://api.cloudflare.com/client/v4"
 

@@ -17,6 +17,8 @@ from .const import (
     CONF_RECORD_NAME,
     CONF_UPDATE_IPV4,
     CONF_UPDATE_IPV6,
+    CONF_CUSTOM_IPV4_URLS,
+    CONF_CUSTOM_IPV6_URLS,
     CF_BASE,
     IPV4_SOURCES,
     IPV6_SOURCES,
@@ -48,6 +50,18 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
     def _record_name(self) -> str:
         return self._entry.data[CONF_RECORD_NAME]
 
+    def _ipv4_sources(self) -> list[str]:
+        raw = self._entry.options.get(CONF_CUSTOM_IPV4_URLS, "").strip()
+        if raw:
+            return [u.strip() for u in raw.split(",") if u.strip()]
+        return IPV4_SOURCES
+
+    def _ipv6_sources(self) -> list[str]:
+        raw = self._entry.options.get(CONF_CUSTOM_IPV6_URLS, "").strip()
+        if raw:
+            return [u.strip() for u in raw.split(",") if u.strip()]
+        return IPV6_SOURCES
+
     def _cf_headers(self) -> dict:
         return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
@@ -60,12 +74,12 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
         ipv6: str | None = None
 
         if self._entry.data.get(CONF_UPDATE_IPV4):
-            ipv4 = await self._detect_ip_with_fallback(session, IPV4_SOURCES, 4)
+            ipv4 = await self._detect_ip_with_fallback(session, self._ipv4_sources(), 4)
 
         if self._entry.data.get(CONF_UPDATE_IPV6):
             ipv6 = _get_local_stable_ipv6()
             if ipv6 is None:
-                ipv6 = await self._detect_ip_with_fallback(session, IPV6_SOURCES, 6)
+                ipv6 = await self._detect_ip_with_fallback(session, self._ipv6_sources(), 6)
             else:
                 _LOGGER.debug("IPv6 detected from local interface: %s", ipv6)
 

@@ -28,5 +28,17 @@
     "abort": {
       "already_configured": "This record is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "IP Detection Sources",
+        "description": "Override the default IP detection URLs. Enter comma-separated URLs, or leave blank to use the built-in defaults.\n\n**Note:** IPv6 always reads the stable address directly from the local network interface first (`/proc/net/if_inet6`). The IPv6 URLs below are only used as a fallback when the local interface cannot be read (e.g. isolated container).",
+        "data": {
+          "custom_ipv4_urls": "Custom IPv4 detection URLs (comma-separated)",
+          "custom_ipv6_urls": "Custom IPv6 fallback URLs (comma-separated)"
+        }
+      }
+    }
   }
 }

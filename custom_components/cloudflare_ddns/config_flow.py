@@ -3,6 +3,7 @@ from __future__ import annotations
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -13,12 +14,19 @@ from .const import (
     CONF_RECORD_NAME,
     CONF_UPDATE_IPV4,
     CONF_UPDATE_IPV6,
+    CONF_CUSTOM_IPV4_URLS,
+    CONF_CUSTOM_IPV6_URLS,
     CF_BASE,
 )
 
 
 class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return CloudflareDDNSOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         self._data: dict = {}
@@ -77,7 +85,9 @@ class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="record_type", data_schema=schema, errors=errors
         )
 
-    async def _validate_token_and_zone(self, token: str, zone_name: str) -> tuple[str | None, str | None]:
+    async def _validate_token_and_zone(
+        self, token: str, zone_name: str
+    ) -> tuple[str | None, str | None]:
         session = async_get_clientsession(self.hass)
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         try:
@@ -98,3 +108,27 @@ class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None, "zone_not_found"
 
         return results[0]["id"], None
+
+
+class CloudflareDDNSOptionsFlow(config_entries.OptionsFlow):
+    def __init__(self, entry: config_entries.ConfigEntry) -> None:
+        self._entry = entry
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        current = self._entry.options
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_CUSTOM_IPV4_URLS,
+                    default=current.get(CONF_CUSTOM_IPV4_URLS, ""),
+                ): str,
+                vol.Optional(
+                    CONF_CUSTOM_IPV6_URLS,
+                    default=current.get(CONF_CUSTOM_IPV6_URLS, ""),
+                ): str,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

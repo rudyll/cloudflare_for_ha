@@ -34,9 +34,12 @@ A Home Assistant custom integration that automatically updates Cloudflare DNS re
 1. Copy the `custom_components/cloudflare_ddns/` folder into your HA `config/custom_components/` directory.
 2. Restart Home Assistant.
 
-#### HACS (coming soon)
+#### HACS
 
-Add this repository as a custom HACS repository (Integration category), then install *Cloudflare DDNS*.
+1. In HACS, go to **Integrations** → click the three-dot menu → **Custom repositories**.
+2. Add `https://github.com/rudyll/cloudflare_for_ha` with category **Integration**.
+3. Search for **Cloudflare DDNS** and install it.
+4. Restart Home Assistant.
 
 ### Configuration
 
@@ -60,6 +63,19 @@ After setup the following entities are created (names use the record name as a p
 | `sensor.<slug>_ipv6` | Sensor | Current detected public IPv6 (only if IPv6 enabled) |
 | `sensor.<slug>_last_updated` | Sensor (timestamp) | Time of the last successful DNS record change |
 | `button.<slug>_force_update` | Button | Immediately trigger a DNS check and update |
+
+### Customizing IP Detection URLs
+
+After setup, click **Configure** on the integration card to override the default detection URLs.
+
+| Field | Behavior |
+|---|---|
+| Custom IPv4 detection URLs | Comma-separated. Replaces the built-in IPv4 source list when non-empty. |
+| Custom IPv6 fallback URLs | Comma-separated. Only used when the local interface cannot be read (see note below). |
+
+> **IPv6 note:** IPv6 always reads the stable (non-temporary) address directly from the local network interface (`/proc/net/if_inet6`) first, bypassing external services entirely. This avoids the Privacy Extensions problem where outbound connections use a rotating temporary address. The IPv6 URLs are only a fallback for environments where `/proc/net/if_inet6` is unavailable (e.g. isolated Docker containers).
+
+Leave either field blank to keep using the built-in defaults.
 
 ### Troubleshooting
 
@@ -102,9 +118,12 @@ After setup the following entities are created (names use the record name as a p
 1. 将 `custom_components/cloudflare_ddns/` 文件夹复制到 HA 的 `config/custom_components/` 目录下。
 2. 重启 Home Assistant。
 
-#### HACS 安装（即将支持）
+#### HACS 安装
 
-在 HACS 中添加本仓库为自定义集成仓库，然后搜索安装 *Cloudflare DDNS*。
+1. 在 HACS 中点击右上角三点菜单 → **自定义存储库**。
+2. 填入 `https://github.com/rudyll/cloudflare_for_ha`，类别选 **集成**。
+3. 搜索 **Cloudflare DDNS** 并安装。
+4. 重启 Home Assistant。
 
 ### 配置步骤
 
@@ -128,6 +147,19 @@ After setup the following entities are created (names use the record name as a p
 | `sensor.<slug>_ipv6` | 传感器 | 当前探测到的公网 IPv6（仅启用 IPv6 时显示）|
 | `sensor.<slug>_last_updated` | 传感器（时间戳）| 上次 DNS 记录实际变更的时间 |
 | `button.<slug>_force_update` | 按钮 | 立即触发一次 DNS 检查与更新 |
+
+### 自定义 IP 探测 URL
+
+安装完成后，在集成卡片上点击**配置**，可以覆盖默认的 IP 探测地址。
+
+| 字段 | 说明 |
+|---|---|
+| 自定义 IPv4 探测 URL | 逗号分隔，非空时替换内置的 IPv4 地址列表 |
+| 自定义 IPv6 备用 URL | 逗号分隔，仅在本地接口读取失败时作为备用（见下方说明）|
+
+> **IPv6 说明：** IPv6 探测优先直接读取本机网络接口（`/proc/net/if_inet6`）里的**稳定地址**，跳过 Privacy Extensions 产生的临时地址，不走任何外部 URL。IPv6 自定义 URL 仅在 `/proc/net/if_inet6` 不可用时（如隔离的 Docker 容器）才会生效。
+
+两个字段留空则继续使用内置默认值。
 
 ### 常见问题
 
