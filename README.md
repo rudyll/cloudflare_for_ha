@@ -6,11 +6,12 @@
 
 ## English
 
-A Home Assistant custom integration that automatically updates Cloudflare DNS records (A and/or AAAA) to your current public IP address. Supports both IPv4 and IPv6, with HA entities to monitor the current IPs and trigger manual updates.
+A Home Assistant custom integration that automatically updates Cloudflare DNS records (A and/or AAAA) to your current public IP address. Supports both IPv4 and IPv6, multiple devices, and HA entities to monitor IPs and trigger manual updates.
 
 ### Features
 
 - Updates Cloudflare **A records** (IPv4) and/or **AAAA records** (IPv6)
+- **Multi-device support** — add the integration multiple times, one entry per DNS record; each entry can target a different LAN device via its MAC address
 - Automatically creates the DNS record if it doesn't exist
 - Polls every **5 minutes** and only calls the Cloudflare API when the IP has changed
 - Exposes HA entities:
@@ -45,13 +46,35 @@ A Home Assistant custom integration that automatically updates Cloudflare DNS re
 
 1. Go to **Settings → Integrations → Add Integration** and search for **Cloudflare DDNS**.
 2. **Step 1 — Credentials & record:**
-   | Field | Example |
-   |---|---|
-   | API Token | `your-cloudflare-api-token` |
-   | Zone Name | `example.com` |
-   | Record Name | `home.example.com` |
+   | Field | Example | Notes |
+   |---|---|---|
+   | API Token | `your-cloudflare-api-token` | Needs `Zone:DNS:Edit` |
+   | Zone Name | `example.com` | |
+   | Record Name | `home.example.com` | Must be unique per entry |
+   | Target Device MAC | `aa:bb:cc:dd:ee:ff` | **Optional.** Leave blank to track the HA host itself. Fill in to track another LAN device. |
 3. **Step 2 — Record types:** check **Update IPv4 (A)**, **Update IPv6 (AAAA)**, or both.
 4. Click **Submit**. The integration validates your token and zone before saving.
+
+### Multi-device setup
+
+Each integration entry handles one DNS record. To expose multiple devices, add the integration once per device:
+
+| Entry | MAC | Record Name | Tracks |
+|---|---|---|---|
+| 1 | *(blank)* | `ha.example.com` | HA host |
+| 2 | `aa:bb:cc:dd:ee:ff` | `nas.example.com` | NAS |
+| 3 | `11:22:33:44:55:66` | `pc.example.com` | Desktop PC |
+
+**IPv6 resolution for other devices uses two strategies in order:**
+
+1. **NDP neighbour cache** (`ip -6 neigh show`) — fast, works for any device that has communicated with the HA host recently
+2. **EUI-64 calculation** — derives the stable IPv6 from the MAC address + the HA host's /64 prefix; works even if the device hasn't been seen recently, but requires both devices to share the same /64 and the target device must **not** have IPv6 Privacy Extensions enabled
+
+> ⚠️ Windows has Privacy Extensions on by default. To disable on Windows:
+> ```powershell
+> netsh interface ipv6 set privacy state=disabled store=persistent
+> ```
+> On Linux: `sysctl -w net.ipv6.conf.all.use_tempaddr=0`
 
 ### Entities
 
@@ -95,6 +118,7 @@ Leave either field blank to keep using the built-in defaults.
 ### 功能特性
 
 - 支持更新 Cloudflare **A 记录**（IPv4）和/或 **AAAA 记录**（IPv6）
+- **多设备支持** — 多次添加集成，每个条目对应一条 DNS 记录，可通过 MAC 地址指向不同的局域网设备
 - 如果 DNS 记录不存在，自动创建
 - 每 **5 分钟** 轮询一次，仅在 IP 变化时才调用 Cloudflare API
 - 暴露以下 HA 实体：
@@ -129,13 +153,35 @@ Leave either field blank to keep using the built-in defaults.
 
 1. 进入 **设置 → 集成 → 添加集成**，搜索 **Cloudflare DDNS**。
 2. **第一步 — 凭据与记录名：**
-   | 字段 | 示例 |
-   |---|---|
-   | API Token | `你的 Cloudflare API Token` |
-   | Zone 名称 | `example.com` |
-   | 记录名称 | `home.example.com` |
+   | 字段 | 示例 | 说明 |
+   |---|---|---|
+   | API Token | `你的 Cloudflare API Token` | 需要 `Zone:DNS:Edit` 权限 |
+   | Zone 名称 | `example.com` | |
+   | 记录名称 | `home.example.com` | 每个条目须唯一 |
+   | 目标设备 MAC | `aa:bb:cc:dd:ee:ff` | **可选。** 留空则追踪 HA 主机本身；填写 MAC 则追踪局域网中的其他设备 |
 3. **第二步 — 记录类型：** 勾选 **更新 IPv4（A）**、**更新 IPv6（AAAA）** 或两者都选。
 4. 点击 **提交**。集成会在保存前验证 Token 和 Zone 是否有效。
+
+### 多设备配置
+
+每个集成条目管理一条 DNS 记录，如需暴露多台设备，重复添加集成即可：
+
+| 条目 | MAC | 记录名 | 追踪目标 |
+|---|---|---|---|
+| 1 | *留空* | `ha.example.com` | HA 主机 |
+| 2 | `aa:bb:cc:dd:ee:ff` | `nas.example.com` | NAS |
+| 3 | `11:22:33:44:55:66` | `pc.example.com` | 台式机 |
+
+**其他设备的 IPv6 通过以下两种策略依次获取：**
+
+1. **NDP 邻居缓存**（`ip -6 neigh show`）— 速度快，适用于最近与 HA 有过通信的设备
+2. **EUI-64 计算** — 由 MAC 地址 + HA 主机的 /64 前缀推算稳定 IPv6；即使设备近期未出现在邻居缓存中也可工作，但要求目标设备与 HA 在同一 /64 子网，且**未开启 IPv6 Privacy Extensions**
+
+> ⚠️ Windows 默认开启 Privacy Extensions，需手动关闭：
+> ```powershell
+> netsh interface ipv6 set privacy state=disabled store=persistent
+> ```
+> Linux 关闭方法：`sysctl -w net.ipv6.conf.all.use_tempaddr=0`
 
 ### 实体说明
 

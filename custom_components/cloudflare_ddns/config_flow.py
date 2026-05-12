@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -16,20 +18,23 @@ from .const import (
     CONF_UPDATE_IPV6,
     CONF_CUSTOM_IPV4_URLS,
     CONF_CUSTOM_IPV6_URLS,
+    CONF_TARGET_MAC,
     CF_BASE,
 )
+
+_MAC_RE = re.compile(r'^([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}$')
 
 
 class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
+    def __init__(self) -> None:
+        self._data: dict = {}
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
         return CloudflareDDNSOptionsFlow(config_entry)
-
-    def __init__(self) -> None:
-        self._data: dict = {}
 
     async def async_step_user(self, user_input=None):
         errors: dict = {}
@@ -38,24 +43,34 @@ class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token = user_input[CONF_API_TOKEN].strip()
             zone_name = user_input[CONF_ZONE_NAME].strip().lower()
             record_name = user_input[CONF_RECORD_NAME].strip().lower()
+            target_mac = user_input.get(CONF_TARGET_MAC, "").strip()
 
-            zone_id, error = await self._validate_token_and_zone(token, zone_name)
-            if error:
-                errors["base"] = error
+            if target_mac and not _MAC_RE.match(target_mac):
+                errors[CONF_TARGET_MAC] = "invalid_mac"
             else:
-                self._data = {
-                    CONF_API_TOKEN: token,
-                    CONF_ZONE_NAME: zone_name,
-                    CONF_ZONE_ID: zone_id,
-                    CONF_RECORD_NAME: record_name,
-                }
-                return await self.async_step_record_type()
+                zone_id, error = await self._validate_token_and_zone(token, zone_name)
+                if error:
+                    errors["base"] = error
+                else:
+                    # Prevent duplicate entries for the same DNS record
+                    await self.async_set_unique_id(record_name)
+                    self._abort_if_unique_id_configured()
+
+                    self._data = {
+                        CONF_API_TOKEN: token,
+                        CONF_ZONE_NAME: zone_name,
+                        CONF_ZONE_ID: zone_id,
+                        CONF_RECORD_NAME: record_name,
+                        CONF_TARGET_MAC: target_mac,
+                    }
+                    return await self.async_step_record_type()
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_API_TOKEN): str,
                 vol.Required(CONF_ZONE_NAME): str,
                 vol.Required(CONF_RECORD_NAME): str,
+                vol.Optional(CONF_TARGET_MAC, default=""): str,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)

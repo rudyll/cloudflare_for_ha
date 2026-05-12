@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -19,6 +21,7 @@ from .const import (
     CONF_UPDATE_IPV6,
     CONF_CUSTOM_IPV4_URLS,
     CONF_CUSTOM_IPV6_URLS,
+    CONF_TARGET_MAC,
     CF_BASE,
     IPV4_SOURCES,
     IPV6_SOURCES,
@@ -50,6 +53,10 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
     def _record_name(self) -> str:
         return self._entry.data[CONF_RECORD_NAME]
 
+    @property
+    def _target_mac(self) -> str:
+        return self._entry.data.get(CONF_TARGET_MAC, "").strip()
+
     def _ipv4_sources(self) -> list[str]:
         raw = self._entry.options.get(CONF_CUSTOM_IPV4_URLS, "").strip()
         if raw:
@@ -77,11 +84,7 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             ipv4 = await self._detect_ip_with_fallback(session, self._ipv4_sources(), 4)
 
         if self._entry.data.get(CONF_UPDATE_IPV6):
-            ipv6 = _get_local_stable_ipv6()
-            if ipv6 is None:
-                ipv6 = await self._detect_ip_with_fallback(session, self._ipv6_sources(), 6)
-            else:
-                _LOGGER.debug("IPv6 detected from local interface: %s", ipv6)
+            ipv6 = await self._detect_ipv6()
 
         changed = False
         if ipv4:
@@ -94,6 +97,34 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
 
         return {"ipv4": ipv4, "ipv6": ipv6, "last_updated": last_updated}
 
+    async def _detect_ipv6(self) -> str | None:
+        mac = self._target_mac
+        if mac:
+            # Target is another device on the LAN
+            ipv6 = await _get_ipv6_from_neigh_cache(mac)
+            if ipv6:
+                _LOGGER.debug("IPv6 for %s found in neighbour cache: %s", mac, ipv6)
+                return ipv6
+            ipv6 = _calculate_eui64_address(mac)
+            if ipv6:
+                _LOGGER.debug("IPv6 for %s calculated via EUI-64: %s", mac, ipv6)
+                return ipv6
+            _LOGGER.warning(
+                "Could not determine IPv6 for MAC %s — "
+                "not in neighbour cache and EUI-64 prefix unavailable",
+                mac,
+            )
+            return None
+        else:
+            # Target is this machine (HA host)
+            ipv6 = _get_local_stable_ipv6()
+            if ipv6:
+                _LOGGER.debug("IPv6 detected from local interface: %s", ipv6)
+                return ipv6
+            return await self._detect_ip_with_fallback(
+                async_get_clientsession(self.hass), self._ipv6_sources(), 6
+            )
+
     async def _detect_ip_with_fallback(self, session, sources: list[str], version: int) -> str | None:
         """Try each source in order; return the first valid IP of the given version."""
         label = f"IPv{version}"
@@ -104,7 +135,7 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug("%s: %s returned HTTP %s, trying next", label, url, resp.status)
                         continue
                     text = await resp.text()
-                ip = self._extract_ip(text, version)
+                ip = _extract_ip(text, version)
                 if ip:
                     _LOGGER.debug("%s detected via %s: %s", label, url, ip)
                     return ip
@@ -112,31 +143,6 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.debug("%s: %s failed (%s), trying next", label, url, err)
         raise UpdateFailed(f"All {label} sources failed: {sources}")
-
-    @staticmethod
-    def _extract_ip(text: str, version: int) -> str | None:
-        """Extract the first valid IPv4 or IPv6 address from arbitrary response text."""
-        # Try JSON {"ip": "..."} first
-        try:
-            import json
-            data = json.loads(text)
-            candidate = data.get("ip") or data.get("address") or data.get("query")
-            if candidate:
-                return _validate_ip(candidate, version)
-        except (ValueError, AttributeError):
-            pass
-
-        # Fall back to regex scan
-        if version == 4:
-            pattern = r'\b(\d{1,3}(?:\.\d{1,3}){3})\b'
-        else:
-            pattern = r'([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7})'
-
-        for match in re.finditer(pattern, text):
-            result = _validate_ip(match.group(1), version)
-            if result:
-                return result
-        return None
 
     async def _sync_record(self, session, record_type: str, ip: str) -> bool:
         """Update or create the DNS record. Returns True if a change was made."""
@@ -204,13 +210,12 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
         return True
 
 
-def _get_local_stable_ipv6() -> str | None:
-    """Read the first stable (non-temporary) global IPv6 from /proc/net/if_inet6.
+# ---------------------------------------------------------------------------
+# IPv6 helpers
+# ---------------------------------------------------------------------------
 
-    Temporary privacy-extension addresses (IFA_F_TEMPORARY = 0x01) are used for
-    outbound connections, so external IP-detection services return them. For DDNS
-    we want the stable EUI-64 address that accepts inbound connections.
-    """
+def _get_local_stable_ipv6() -> str | None:
+    """Read the first stable (non-temporary) global IPv6 from /proc/net/if_inet6."""
     try:
         with open("/proc/net/if_inet6") as f:
             for line in f:
@@ -218,15 +223,112 @@ def _get_local_stable_ipv6() -> str | None:
                 if len(parts) < 6:
                     continue
                 addr_hex, _idx, _prefix, scope_hex, flags_hex, _iface = parts
-                if int(scope_hex, 16) != 0:        # must be global scope
+                if int(scope_hex, 16) != 0:    # global scope only
                     continue
-                if int(flags_hex, 16) & 0x01:      # skip IFA_F_TEMPORARY
+                if int(flags_hex, 16) & 0x01:  # skip IFA_F_TEMPORARY
                     continue
                 addr = ipaddress.IPv6Address(int(addr_hex, 16))
                 if not addr.is_private and not addr.is_loopback and not addr.is_link_local:
                     return str(addr)
     except OSError:
         pass
+    return None
+
+
+async def _get_ipv6_from_neigh_cache(mac: str) -> str | None:
+    """Look up a device's global IPv6 in the NDP neighbour cache by MAC address.
+
+    Runs `ip -6 neigh show` and returns the first non-link-local address
+    whose lladdr matches *mac* (case-insensitive, colon-normalised).
+    """
+    normalised_mac = mac.lower().replace("-", ":")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ip", "-6", "neigh", "show",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+    except Exception as err:
+        _LOGGER.debug("ip -6 neigh show failed: %s", err)
+        return None
+
+    for line in stdout.decode().splitlines():
+        # format: <ipv6> dev <iface> lladdr <mac> [router] <state>
+        parts = line.lower().split()
+        if normalised_mac not in parts:
+            continue
+        candidate = _validate_ip(parts[0], 6)
+        if candidate:
+            return candidate
+    return None
+
+
+def _calculate_eui64_address(mac: str) -> str | None:
+    """Derive a device's stable global IPv6 from its MAC using EUI-64.
+
+    Takes the /64 prefix from this host's own stable global address and
+    combines it with the EUI-64 interface identifier computed from *mac*.
+    Requires that both devices share the same /64 prefix.
+    """
+    prefix = _get_local_prefix64()
+    if not prefix:
+        return None
+    suffix = _eui64_suffix(mac)
+    if not suffix:
+        return None
+    try:
+        return str(ipaddress.IPv6Address(f"{prefix}:{suffix}"))
+    except ValueError:
+        return None
+
+
+def _get_local_prefix64() -> str | None:
+    """Return the first 64-bit prefix of this host's stable global IPv6."""
+    addr_str = _get_local_stable_ipv6()
+    if not addr_str:
+        return None
+    groups = ipaddress.IPv6Address(addr_str).exploded.split(":")
+    return ":".join(groups[:4])
+
+
+def _eui64_suffix(mac: str) -> str | None:
+    """Convert a MAC address to an EUI-64 interface identifier (4 hex groups)."""
+    try:
+        parts = mac.lower().replace("-", ":").split(":")
+        if len(parts) != 6:
+            return None
+        b = [int(x, 16) for x in parts]
+        b[0] ^= 0x02                    # flip universal/local bit
+        b = b[:3] + [0xFF, 0xFE] + b[3:]  # insert ff:fe
+        return f"{b[0]:02x}{b[1]:02x}:{b[2]:02x}{b[3]:02x}:{b[4]:02x}{b[5]:02x}:{b[6]:02x}{b[7]:02x}"
+    except (ValueError, IndexError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Generic IP helpers
+# ---------------------------------------------------------------------------
+
+def _extract_ip(text: str, version: int) -> str | None:
+    """Extract the first valid public IP of *version* from arbitrary response text."""
+    try:
+        data = json.loads(text)
+        candidate = data.get("ip") or data.get("address") or data.get("query")
+        if candidate:
+            return _validate_ip(candidate, version)
+    except (ValueError, AttributeError):
+        pass
+
+    pattern = (
+        r'\b(\d{1,3}(?:\.\d{1,3}){3})\b'
+        if version == 4
+        else r'([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7})'
+    )
+    for match in re.finditer(pattern, text):
+        result = _validate_ip(match.group(1), version)
+        if result:
+            return result
     return None
 
 

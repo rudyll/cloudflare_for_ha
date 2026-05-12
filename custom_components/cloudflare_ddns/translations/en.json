@@ -7,7 +7,11 @@
         "data": {
           "api_token": "API Token",
           "zone_name": "Zone Name (e.g. example.com)",
-          "record_name": "Record Name (e.g. home.example.com)"
+          "record_name": "Record Name (e.g. home.example.com)",
+          "target_mac": "Target Device MAC Address (optional)"
+        },
+        "data_description": {
+          "target_mac": "Leave blank to track this machine (Home Assistant host). Fill in a MAC address (e.g. aa:bb:cc:dd:ee:ff) to track another device on the LAN. The IPv6 address is looked up via the NDP neighbour cache first, then calculated from the MAC using EUI-64. Note: the target device must not have IPv6 Privacy Extensions enabled."
         }
       },
       "record_type": {
@@ -23,10 +27,11 @@
       "cannot_connect": "Failed to connect to Cloudflare. Check your internet connection.",
       "invalid_token": "Invalid API Token or insufficient permissions. The token needs Zone:DNS:Edit.",
       "zone_not_found": "Zone not found. Make sure the zone name matches exactly what is in Cloudflare.",
-      "select_at_least_one": "Select at least one record type (IPv4 or IPv6)."
+      "select_at_least_one": "Select at least one record type (IPv4 or IPv6).",
+      "invalid_mac": "Invalid MAC address format. Use aa:bb:cc:dd:ee:ff or aa-bb-cc-dd-ee-ff."
     },
     "abort": {
-      "already_configured": "This record is already configured."
+      "already_configured": "A DDNS entry for this record name already exists."
     }
   },
   "options": {
