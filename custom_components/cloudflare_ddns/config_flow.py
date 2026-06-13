@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 
 import voluptuous as vol
@@ -19,10 +20,24 @@ from .const import (
     CONF_CUSTOM_IPV4_URLS,
     CONF_CUSTOM_IPV6_URLS,
     CONF_TARGET_MAC,
+    CONF_TARGET_IPV6,
     CF_BASE,
 )
 
 _MAC_RE = re.compile(r'^([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}$')
+
+
+def _valid_global_ipv6(value: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return (
+        addr.version == 6
+        and not addr.is_private
+        and not addr.is_loopback
+        and not addr.is_link_local
+    )
 
 
 class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -43,9 +58,12 @@ class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token = user_input[CONF_API_TOKEN].strip()
             zone_name = user_input[CONF_ZONE_NAME].strip().lower()
             record_name = user_input[CONF_RECORD_NAME].strip().lower()
+            target_ipv6 = user_input.get(CONF_TARGET_IPV6, "").strip()
             target_mac = user_input.get(CONF_TARGET_MAC, "").strip()
 
-            if target_mac and not _MAC_RE.match(target_mac):
+            if target_ipv6 and not _valid_global_ipv6(target_ipv6):
+                errors[CONF_TARGET_IPV6] = "invalid_ipv6"
+            elif target_mac and not _MAC_RE.match(target_mac):
                 errors[CONF_TARGET_MAC] = "invalid_mac"
             else:
                 zone_id, error = await self._validate_token_and_zone(token, zone_name)
@@ -61,6 +79,7 @@ class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ZONE_NAME: zone_name,
                         CONF_ZONE_ID: zone_id,
                         CONF_RECORD_NAME: record_name,
+                        CONF_TARGET_IPV6: target_ipv6,
                         CONF_TARGET_MAC: target_mac,
                     }
                     return await self.async_step_record_type()
@@ -70,6 +89,7 @@ class CloudflareDDNSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_API_TOKEN): str,
                 vol.Required(CONF_ZONE_NAME): str,
                 vol.Required(CONF_RECORD_NAME): str,
+                vol.Optional(CONF_TARGET_IPV6, default=""): str,
                 vol.Optional(CONF_TARGET_MAC, default=""): str,
             }
         )

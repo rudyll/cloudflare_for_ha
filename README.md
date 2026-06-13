@@ -51,30 +51,35 @@ A Home Assistant custom integration that automatically updates Cloudflare DNS re
    | API Token | `your-cloudflare-api-token` | Needs `Zone:DNS:Edit` |
    | Zone Name | `example.com` | |
    | Record Name | `home.example.com` | Must be unique per entry |
-   | Target Device MAC | `aa:bb:cc:dd:ee:ff` | **Optional.** Leave blank to track the HA host itself. Fill in to track another LAN device. |
+   | Target Fixed IPv6 | `2001:db8::1` | **Optional.** Track another device by its fixed IPv6. Most reliable, works for any device. |
+   | Target Device MAC | `aa:bb:cc:dd:ee:ff` | **Optional.** Resolve another device's IPv6 from its MAC. EUI-64 devices only — see limitation below. |
 3. **Step 2 — Record types:** check **Update IPv4 (A)**, **Update IPv6 (AAAA)**, or both.
 4. Click **Submit**. The integration validates your token and zone before saving.
 
+> Leave **both** target fields blank to track the HA host itself. If both are filled, the **fixed IPv6 takes precedence**.
+
 ### Multi-device setup
 
-Each integration entry handles one DNS record. To expose multiple devices, add the integration once per device:
+Each integration entry handles one DNS record. To expose multiple devices, add the integration once per device. There are three ways to specify what each entry tracks:
 
-| Entry | MAC | Record Name | Tracks |
-|---|---|---|---|
-| 1 | *(blank)* | `ha.example.com` | HA host |
-| 2 | `aa:bb:cc:dd:ee:ff` | `nas.example.com` | NAS |
-| 3 | `11:22:33:44:55:66` | `pc.example.com` | Desktop PC |
+| Method | When to use | Reliability |
+|---|---|---|
+| **Both target fields blank** | Track the HA host itself | ✅ Always works |
+| **Fixed IPv6** | Track any other device | ✅ Works for any device/OS |
+| **MAC address** | Track an EUI-64 device when you don't want to hardcode its address | ⚠️ EUI-64 devices only (see below) |
 
-**IPv6 resolution for other devices uses two strategies in order:**
+#### ⚠️ EUI-64 / MAC limitation — read before using the MAC field
 
-1. **NDP neighbour cache** (`ip -6 neigh show`) — fast, works for any device that has communicated with the HA host recently
-2. **EUI-64 calculation** — derives the stable IPv6 from the MAC address + the HA host's /64 prefix; works even if the device hasn't been seen recently, but requires both devices to share the same /64 and the target device must **not** have IPv6 Privacy Extensions enabled
+Resolving a device's IPv6 from its MAC only works for devices that use **EUI-64** addresses (the interface ID embeds the MAC as `...ff:fe...`). When a MAC is given, the integration tries:
 
-> ⚠️ Windows has Privacy Extensions on by default. To disable on Windows:
-> ```powershell
-> netsh interface ipv6 set privacy state=disabled store=persistent
-> ```
-> On Linux: `sysctl -w net.ipv6.conf.all.use_tempaddr=0`
+1. **NDP neighbour cache** (`ip -6 neigh show`) — when several addresses exist for the MAC, it prefers the one matching the EUI-64 pattern (the provably stable one)
+2. **EUI-64 calculation** — derives the stable IPv6 from `MAC + the HA host's /64 prefix` (requires both devices on the same /64)
+
+**This does NOT work for most modern devices.** Phones (Android/iOS), Macs, Windows, and modern Linux (NetworkManager default) use **RFC 7217 stable-privacy** addresses — an opaque interface ID that is *deliberately not derivable from the MAC*. For these devices the MAC method returns a wrong or rotating (temporary) address. **Use the Fixed IPv6 field instead.**
+
+> To find a device's fixed IPv6: run `ip -6 addr show` (Linux/macOS) or `ipconfig` (Windows) on it and copy the stable `scope global` address. On devices with Privacy Extensions you may also want to disable temporary addresses so the address stays put:
+> - Windows: `netsh interface ipv6 set privacy state=disabled store=persistent`
+> - Linux: `sysctl -w net.ipv6.conf.all.use_tempaddr=0`
 
 ### Entities
 
@@ -158,30 +163,35 @@ Leave either field blank to keep using the built-in defaults.
    | API Token | `你的 Cloudflare API Token` | 需要 `Zone:DNS:Edit` 权限 |
    | Zone 名称 | `example.com` | |
    | 记录名称 | `home.example.com` | 每个条目须唯一 |
-   | 目标设备 MAC | `aa:bb:cc:dd:ee:ff` | **可选。** 留空则追踪 HA 主机本身；填写 MAC 则追踪局域网中的其他设备 |
+   | 目标固定 IPv6 | `2001:db8::1` | **可选。** 用固定 IPv6 追踪其他设备，最可靠，所有设备通用 |
+   | 目标设备 MAC | `aa:bb:cc:dd:ee:ff` | **可选。** 由 MAC 推算其他设备 IPv6，仅 EUI-64 设备有效，见下方限制 |
 3. **第二步 — 记录类型：** 勾选 **更新 IPv4（A）**、**更新 IPv6（AAAA）** 或两者都选。
 4. 点击 **提交**。集成会在保存前验证 Token 和 Zone 是否有效。
 
+> **两个目标字段都留空**则追踪 HA 主机本身；若两个都填，**固定 IPv6 优先**。
+
 ### 多设备配置
 
-每个集成条目管理一条 DNS 记录，如需暴露多台设备，重复添加集成即可：
+每个集成条目管理一条 DNS 记录，如需暴露多台设备，重复添加集成即可。每个条目有三种指定追踪目标的方式：
 
-| 条目 | MAC | 记录名 | 追踪目标 |
-|---|---|---|---|
-| 1 | *留空* | `ha.example.com` | HA 主机 |
-| 2 | `aa:bb:cc:dd:ee:ff` | `nas.example.com` | NAS |
-| 3 | `11:22:33:44:55:66` | `pc.example.com` | 台式机 |
+| 方式 | 适用场景 | 可靠性 |
+|---|---|---|
+| **两个目标字段都留空** | 追踪 HA 主机本身 | ✅ 始终有效 |
+| **固定 IPv6** | 追踪任意其他设备 | ✅ 所有设备/系统通用 |
+| **MAC 地址** | 追踪 EUI-64 设备且不想写死地址 | ⚠️ 仅 EUI-64 设备（见下） |
 
-**其他设备的 IPv6 通过以下两种策略依次获取：**
+#### ⚠️ EUI-64 / MAC 限制 —— 使用 MAC 字段前必读
 
-1. **NDP 邻居缓存**（`ip -6 neigh show`）— 速度快，适用于最近与 HA 有过通信的设备
-2. **EUI-64 计算** — 由 MAC 地址 + HA 主机的 /64 前缀推算稳定 IPv6；即使设备近期未出现在邻居缓存中也可工作，但要求目标设备与 HA 在同一 /64 子网，且**未开启 IPv6 Privacy Extensions**
+由 MAC 推算 IPv6 **只对使用 EUI-64 地址的设备有效**（接口 ID 中嵌入 MAC，形如 `...ff:fe...`）。填入 MAC 时，集成会依次尝试：
 
-> ⚠️ Windows 默认开启 Privacy Extensions，需手动关闭：
-> ```powershell
-> netsh interface ipv6 set privacy state=disabled store=persistent
-> ```
-> Linux 关闭方法：`sysctl -w net.ipv6.conf.all.use_tempaddr=0`
+1. **NDP 邻居缓存**（`ip -6 neigh show`）—— 当同一 MAC 有多个地址时，优先选符合 EUI-64 模式的那个（即可确定的稳定地址）
+2. **EUI-64 计算** —— 由 `MAC + HA 主机的 /64 前缀` 推算稳定 IPv6（要求两台设备在同一 /64 子网）
+
+**对大多数现代设备无效。** 手机（Android/iOS）、Mac、Windows、现代 Linux（NetworkManager 默认）使用 **RFC 7217 稳定隐私地址**——接口 ID 是不透明的，且**故意设计成无法从 MAC 反推**。对这些设备，MAC 方式会返回错误的或不断轮换的临时地址，**请改用固定 IPv6 字段**。
+
+> 查设备固定 IPv6：在该设备上运行 `ip -6 addr show`（Linux/macOS）或 `ipconfig`（Windows），复制 `scope global` 的稳定地址。若设备开了隐私扩展，建议同时关闭临时地址让地址稳定：
+> - Windows：`netsh interface ipv6 set privacy state=disabled store=persistent`
+> - Linux：`sysctl -w net.ipv6.conf.all.use_tempaddr=0`
 
 ### 实体说明
 

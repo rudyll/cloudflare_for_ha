@@ -22,6 +22,7 @@ from .const import (
     CONF_CUSTOM_IPV4_URLS,
     CONF_CUSTOM_IPV6_URLS,
     CONF_TARGET_MAC,
+    CONF_TARGET_IPV6,
     CF_BASE,
     IPV4_SOURCES,
     IPV6_SOURCES,
@@ -56,6 +57,10 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
     @property
     def _target_mac(self) -> str:
         return self._entry.data.get(CONF_TARGET_MAC, "").strip()
+
+    @property
+    def _target_ipv6(self) -> str:
+        return self._entry.data.get(CONF_TARGET_IPV6, "").strip()
 
     def _ipv4_sources(self) -> list[str]:
         raw = self._entry.options.get(CONF_CUSTOM_IPV4_URLS, "").strip()
@@ -98,9 +103,15 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
         return {"ipv4": ipv4, "ipv6": ipv6, "last_updated": last_updated}
 
     async def _detect_ipv6(self) -> str | None:
+        # 1. Manually fixed address — most reliable, works for any device/OS
+        manual = self._target_ipv6
+        if manual:
+            _LOGGER.debug("IPv6 using fixed address from config: %s", manual)
+            return manual
+
+        # 2. Another LAN device, resolved from its MAC (EUI-64 devices only)
         mac = self._target_mac
         if mac:
-            # Target is another device on the LAN
             ipv6 = await _get_ipv6_from_neigh_cache(mac)
             if ipv6:
                 _LOGGER.debug("IPv6 for %s found in neighbour cache: %s", mac, ipv6)
@@ -110,20 +121,22 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("IPv6 for %s calculated via EUI-64: %s", mac, ipv6)
                 return ipv6
             _LOGGER.warning(
-                "Could not determine IPv6 for MAC %s — "
-                "not in neighbour cache and EUI-64 prefix unavailable",
+                "Could not determine IPv6 for MAC %s — not in neighbour cache and "
+                "EUI-64 prefix unavailable. Modern devices (phones, Macs, Windows) "
+                "use RFC 7217 addresses that cannot be derived from the MAC; set a "
+                "fixed Target IPv6 address for those.",
                 mac,
             )
             return None
-        else:
-            # Target is this machine (HA host)
-            ipv6 = _get_local_stable_ipv6()
-            if ipv6:
-                _LOGGER.debug("IPv6 detected from local interface: %s", ipv6)
-                return ipv6
-            return await self._detect_ip_with_fallback(
-                async_get_clientsession(self.hass), self._ipv6_sources(), 6
-            )
+
+        # 3. This machine (HA host)
+        ipv6 = _get_local_stable_ipv6()
+        if ipv6:
+            _LOGGER.debug("IPv6 detected from local interface: %s", ipv6)
+            return ipv6
+        return await self._detect_ip_with_fallback(
+            async_get_clientsession(self.hass), self._ipv6_sources(), 6
+        )
 
     async def _detect_ip_with_fallback(self, session, sources: list[str], version: int) -> str | None:
         """Try each source in order; return the first valid IP of the given version."""
@@ -240,6 +253,13 @@ async def _get_ipv6_from_neigh_cache(mac: str) -> str | None:
 
     Runs `ip -6 neigh show` and returns the first non-link-local address
     whose lladdr matches *mac* (case-insensitive, colon-normalised).
+
+    A device may have several global addresses (stable + temporary privacy).
+    The neighbour table carries no temporary/stable flag, so when more than one
+    is present we prefer the address whose lower 64 bits match the EUI-64 ID
+    derived from the MAC — that one is provably the stable address. This only
+    helps EUI-64 devices; for RFC 7217 devices both addresses are opaque and we
+    fall back to the first match (which may be a rotating temporary address).
     """
     normalised_mac = mac.lower().replace("-", ":")
     try:
@@ -253,6 +273,7 @@ async def _get_ipv6_from_neigh_cache(mac: str) -> str | None:
         _LOGGER.debug("ip -6 neigh show failed: %s", err)
         return None
 
+    candidates: list[str] = []
     for line in stdout.decode().splitlines():
         # format: <ipv6> dev <iface> lladdr <mac> [router] <state>
         parts = line.lower().split()
@@ -260,8 +281,23 @@ async def _get_ipv6_from_neigh_cache(mac: str) -> str | None:
             continue
         candidate = _validate_ip(parts[0], 6)
         if candidate:
-            return candidate
-    return None
+            candidates.append(candidate)
+
+    if not candidates:
+        return None
+
+    suffix = _eui64_suffix(mac)
+    if suffix:
+        for candidate in candidates:
+            if _matches_eui64_suffix(candidate, suffix):
+                return candidate
+    return candidates[0]
+
+
+def _matches_eui64_suffix(addr_str: str, suffix: str) -> bool:
+    """Whether the lower 64 bits of *addr_str* equal the EUI-64 *suffix*."""
+    groups = ipaddress.IPv6Address(addr_str).exploded.lower().split(":")
+    return ":".join(groups[4:]) == suffix.lower()
 
 
 def _calculate_eui64_address(mac: str) -> str | None:

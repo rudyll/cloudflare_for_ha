@@ -8,10 +8,12 @@
           "api_token": "API Token",
           "zone_name": "Zone Name (e.g. example.com)",
           "record_name": "Record Name (e.g. home.example.com)",
+          "target_ipv6": "Target Device Fixed IPv6 (optional)",
           "target_mac": "Target Device MAC Address (optional)"
         },
         "data_description": {
-          "target_mac": "Leave blank to track this machine (Home Assistant host). Fill in a MAC address (e.g. aa:bb:cc:dd:ee:ff) to track another device on the LAN. The IPv6 address is looked up via the NDP neighbour cache first, then calculated from the MAC using EUI-64. Note: the target device must not have IPv6 Privacy Extensions enabled."
+          "target_ipv6": "Leave both target fields blank to track this machine (the Home Assistant host). To track ANOTHER device, the most reliable option is to enter that device's fixed global IPv6 here — run 'ip -6 addr' (or 'ipconfig') on it and copy the stable 'scope global' address. Works for any device and OS.",
+          "target_mac": "Alternative to the fixed IPv6 above: resolve another device's IPv6 from its MAC (e.g. aa:bb:cc:dd:ee:ff), via the NDP neighbour cache then EUI-64. ⚠️ This only works reliably for devices that use EUI-64 addresses (some Linux/IoT/routers). Modern phones, Macs and Windows use RFC 7217 / privacy addresses that CANNOT be derived from a MAC — use the fixed IPv6 field for those. If both fields are filled, the fixed IPv6 wins."
         }
       },
       "record_type": {
@@ -28,7 +30,8 @@
       "invalid_token": "Invalid API Token or insufficient permissions. The token needs Zone:DNS:Edit.",
       "zone_not_found": "Zone not found. Make sure the zone name matches exactly what is in Cloudflare.",
       "select_at_least_one": "Select at least one record type (IPv4 or IPv6).",
-      "invalid_mac": "Invalid MAC address format. Use aa:bb:cc:dd:ee:ff or aa-bb-cc-dd-ee-ff."
+      "invalid_mac": "Invalid MAC address format. Use aa:bb:cc:dd:ee:ff or aa-bb-cc-dd-ee-ff.",
+      "invalid_ipv6": "Invalid IPv6 address. Enter a global (public) IPv6 address, not a link-local (fe80::) or private one."
     },
     "abort": {
       "already_configured": "A DDNS entry for this record name already exists."
