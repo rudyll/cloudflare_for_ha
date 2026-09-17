@@ -5,7 +5,7 @@
   "issue_tracker": "https://github.com/rudyll/cloudflare_for_ha/issues",
   "codeowners": ["@rudyll"],
   "requirements": [],
-  "version": "1.0.0",
+  "version": "1.2.0",
   "iot_class": "cloud_polling",
   "config_flow": true
 }
