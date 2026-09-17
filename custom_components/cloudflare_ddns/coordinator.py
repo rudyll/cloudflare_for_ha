@@ -23,6 +23,7 @@ from .const import (
     CONF_CUSTOM_IPV6_URLS,
     CONF_TARGET_MAC,
     CONF_TARGET_IPV6,
+    CONF_PROXIED,
     CF_BASE,
     IPV4_SOURCES,
     IPV6_SOURCES,
@@ -73,6 +74,10 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
         if raw:
             return [u.strip() for u in raw.split(",") if u.strip()]
         return IPV6_SOURCES
+
+    @property
+    def _proxied(self) -> bool:
+        return self._entry.options.get(CONF_PROXIED, False)
 
     def _cf_headers(self) -> dict:
         return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
@@ -187,7 +192,7 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             "name": self._record_name,
             "content": ip,
             "ttl": 1,
-            "proxied": False,
+            "proxied": self._proxied,
         }
         try:
             async with session.post(url, headers=self._cf_headers(), json=payload) as resp:
@@ -208,7 +213,7 @@ class CloudflareDDNSCoordinator(DataUpdateCoordinator):
             "name": self._record_name,
             "content": ip,
             "ttl": 1,
-            "proxied": False,
+            "proxied": self._proxied,
         }
         try:
             async with session.patch(url, headers=self._cf_headers(), json=payload) as resp:

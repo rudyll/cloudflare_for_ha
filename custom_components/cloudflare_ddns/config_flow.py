@@ -21,6 +21,7 @@ from .const import (
     CONF_CUSTOM_IPV6_URLS,
     CONF_TARGET_MAC,
     CONF_TARGET_IPV6,
+    CONF_PROXIED,
     CF_BASE,
 )
 
@@ -164,6 +165,10 @@ class CloudflareDDNSOptionsFlow(config_entries.OptionsFlow):
                     CONF_CUSTOM_IPV6_URLS,
                     default=current.get(CONF_CUSTOM_IPV6_URLS, ""),
                 ): str,
+                vol.Optional(
+                    CONF_PROXIED,
+                    default=current.get(CONF_PROXIED, False),
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

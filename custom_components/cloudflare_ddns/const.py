@@ -10,6 +10,7 @@ CONF_CUSTOM_IPV4_URLS = "custom_ipv4_urls"
 CONF_CUSTOM_IPV6_URLS = "custom_ipv6_urls"
 CONF_TARGET_MAC = "target_mac"
 CONF_TARGET_IPV6 = "target_ipv6"
+CONF_PROXIED = "proxied"
 
 CF_BASE = "https://api.cloudflare.com/client/v4"
 
